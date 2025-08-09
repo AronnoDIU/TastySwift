@@ -178,6 +178,7 @@
                             @if($admin->tokens()->count() > 0)
                                 <form action="{{ route('admin.api.token.revoke') }}" method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to revoke your API token? This action cannot be undone.');">
                                     @csrf
+                                    @method('DELETE')
                                     <button type="submit" class="btn btn-outline-danger me-2">
                                         <i class="fas fa-ban me-1"></i> Revoke Token
                                     </button>

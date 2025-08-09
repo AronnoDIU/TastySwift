@@ -9,7 +9,7 @@
                      height="80" 
                      alt="{{ auth('admin')->user()->name }}">
                 <h6 class="mb-1">{{ auth('admin')->user()->name }}</h6>
-                <small class="text-muted">{{ ucfirst(auth('admin')->user()->role) }}</small>
+                <small class="text-muted">{{ auth('admin')->user()->formatted_role }}</small>
             </div>
             
             <hr class="my-3">

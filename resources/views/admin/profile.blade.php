@@ -24,7 +24,7 @@
                              height="150">
                     </div>
                     <h4 class="mb-1">{{ $admin->name }}</h4>
-                    <p class="text-muted">{{ ucfirst($admin->role) }}</p>
+                    <p class="text-muted">{{ $admin->formatted_role }}</p>
                 </div>
                 
                 <div class="card-body border-top">

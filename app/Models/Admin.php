@@ -76,6 +76,7 @@ class Admin extends Authenticatable
      */
     protected $appends = [
         'avatar_url',
+        'formatted_role',
     ];
 
     /**
@@ -140,5 +141,21 @@ class Admin extends Authenticatable
     public function isActive(): bool
     {
         return $this->status === 'active';
+    }
+
+    /**
+     * Get the formatted role name.
+     *
+     * @return string
+     */
+    public function getFormattedRoleAttribute(): string
+    {
+        return match($this->role) {
+            'super_admin' => 'Super Admin',
+            'admin' => 'Admin',
+            'editor' => 'Editor',
+            'viewer' => 'Viewer',
+            default => ucfirst(str_replace('_', ' ', $this->role))
+        };
     }
 }

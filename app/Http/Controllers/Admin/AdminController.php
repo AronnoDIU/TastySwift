@@ -58,15 +58,30 @@ class AdminController extends Controller
         // Handle avatar upload
         if ($request->hasFile('avatar')) {
             // Delete old avatar if exists
-            if ($admin->avatar && Storage::exists('public/' . $admin->avatar)) {
-                Storage::delete('public/' . $admin->avatar);
+            if ($admin->avatar) {
+                // Remove 'public/' from the path if it exists
+                $oldPath = str_replace('storage/', '', $admin->avatar);
+                if (Storage::disk('public')->exists($oldPath)) {
+                    Storage::disk('public')->delete($oldPath);
+                }
             }
             
+            // Store the new avatar
             $path = $request->file('avatar')->store('admin/avatars', 'public');
             $validated['avatar'] = $path;
+            
+            // Clear the avatar URL from the model's cache
+            if (method_exists($admin, 'forgetCachedAttributes')) {
+                $admin->forgetCachedAttributes(['avatar_url']);
+            }
         }
 
         $admin->update($validated);
+        
+        // Clear the avatar URL from the model's cache after update
+        if (method_exists($admin, 'forgetCachedAttributes')) {
+            $admin->forgetCachedAttributes(['avatar_url']);
+        }
 
         return back()->with('status', 'Profile updated successfully!');
     }
