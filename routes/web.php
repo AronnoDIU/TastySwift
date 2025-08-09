@@ -95,6 +95,7 @@ Route::prefix('admin')->name('admin.')->group(function() {
         Route::get('profile', [AdminController::class, 'profile'])->name('profile');
         Route::put('profile', [AdminController::class, 'updateProfile'])->name('profile.update');
         Route::put('password', [AdminController::class, 'updatePassword'])->name('password.update');
+        Route::delete('profile', [AdminController::class, 'destroyProfile'])->name('profile.destroy');
         
         // Settings
         Route::get('settings', [AdminController::class, 'settings'])->name('settings');
@@ -109,6 +110,22 @@ Route::prefix('admin')->name('admin.')->group(function() {
             
         Route::delete('api/token/revoke', [AdminController::class, 'revokeApiToken'])
             ->name('api.token.revoke');
+            
+        // Two Factor Authentication
+        Route::post('two-factor/enable', [AdminController::class, 'enableTwoFactorAuth'])
+            ->name('two-factor.enable');
+            
+        Route::post('two-factor/disable', [AdminController::class, 'disableTwoFactorAuth'])
+            ->name('two-factor.disable');
+            
+        Route::get('two-factor/qr-code', [AdminController::class, 'getTwoFactorQrCode'])
+            ->name('two-factor.qr-code');
+            
+        Route::get('two-factor/secret-key', [AdminController::class, 'getTwoFactorSecretKey'])
+            ->name('two-factor.secret-key');
+            
+        Route::post('two-factor/verify', [AdminController::class, 'verifyTwoFactorCode'])
+            ->name('two-factor.verify');
             
         // Email Verification
         Route::get('email/verify/{id}/{hash}', [AdminLoginController::class, 'verifyEmail'])

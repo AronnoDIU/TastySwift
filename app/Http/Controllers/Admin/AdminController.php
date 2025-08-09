@@ -93,8 +93,14 @@ class AdminController extends Controller
      */
     public function settings(): View
     {
+        $admin = auth('admin')->user();
+        $activities = $admin->actions()
+            ->latest()
+            ->paginate(10); // Changed from take(10)->get() to paginate(10)
+            
         return view('admin.settings', [
-            'admin' => auth('admin')->user()
+            'admin' => $admin,
+            'activities' => $activities
         ]);
     }
 
@@ -148,6 +154,181 @@ class AdminController extends Controller
     {
         $request->user('admin')->tokens()->delete();
         
-        return back()->with('status', 'API token revoked successfully!');
+        return back()->with('status', 'API token has been revoked.');
+    }
+    
+    /**
+     * Delete the admin's account.
+     */
+    public function destroyProfile(Request $request): RedirectResponse
+    {
+        $request->validateWithBag('adminDeletion', [
+            'password' => ['required', 'current-password:admin'],
+        ]);
+
+        $admin = $request->user('admin');
+        
+        // Log out the admin
+        auth('admin')->logout();
+        
+        // Delete the admin's profile photo if it exists
+        if ($admin->profile_photo_path) {
+            Storage::disk('public')->delete($admin->profile_photo_path);
+        }
+        
+        // Delete the admin
+        $admin->delete();
+        
+        // Invalidate the session
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+        
+        return redirect()->route('admin.login')
+            ->with('status', 'Your account has been permanently deleted.');
+    }
+    
+    /**
+     * Enable two-factor authentication for the admin.
+     */
+    public function enableTwoFactorAuth(Request $request)
+    {
+        $admin = $request->user('admin');
+        
+        // Generate a new secret key if one doesn't exist
+        if (empty($admin->two_factor_secret)) {
+            $google2fa = app('pragmarx.google2fa');
+            $secretKey = $google2fa->generateSecretKey();
+            
+            $admin->forceFill([
+                'two_factor_secret' => encrypt($secretKey),
+                'two_factor_recovery_codes' => null,
+            ])->save();
+        }
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Two-factor authentication has been enabled.'
+        ]);
+    }
+    
+    /**
+     * Disable two-factor authentication for the admin.
+     */
+    public function disableTwoFactorAuth(Request $request)
+    {
+        $admin = $request->user('admin');
+        
+        $admin->forceFill([
+            'two_factor_secret' => null,
+            'two_factor_recovery_codes' => null,
+        ])->save();
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Two-factor authentication has been disabled.'
+        ]);
+    }
+    
+    /**
+     * Get the two-factor authentication QR code.
+     */
+    public function getTwoFactorQrCode(Request $request)
+    {
+        $admin = $request->user('admin');
+        
+        if (empty($admin->two_factor_secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Two-factor authentication is not enabled.'
+            ], 400);
+        }
+        
+        $google2fa = app('pragmarx.google2fa');
+        $qrCodeUrl = $google2fa->getQRCodeUrl(
+            config('app.name'),
+            $admin->email,
+            decrypt($admin->two_factor_secret)
+        );
+        
+        return response()->json([
+            'success' => true,
+            'qr_code_url' => $qrCodeUrl
+        ]);
+    }
+    
+    /**
+     * Get the two-factor authentication secret key.
+     */
+    public function getTwoFactorSecretKey(Request $request)
+    {
+        $admin = $request->user('admin');
+        
+        if (empty($admin->two_factor_secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Two-factor authentication is not enabled.'
+            ], 400);
+        }
+        
+        return response()->json([
+            'success' => true,
+            'secret_key' => decrypt($admin->two_factor_secret)
+        ]);
+    }
+    
+    /**
+     * Verify the two-factor authentication code.
+     */
+    public function verifyTwoFactorCode(Request $request)
+    {
+        $request->validate([
+            'code' => 'required|string',
+        ]);
+        
+        $admin = $request->user('admin');
+        
+        if (empty($admin->two_factor_secret)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Two-factor authentication is not enabled.'
+            ], 400);
+        }
+        
+        $google2fa = app('pragmarx.google2fa');
+        $valid = $google2fa->verifyKey(
+            decrypt($admin->two_factor_secret),
+            $request->code
+        );
+        
+        if ($valid) {
+            // Generate recovery codes if they don't exist
+            if (empty($admin->two_factor_recovery_codes)) {
+                $recoveryCodes = collect(
+                    array_map(function () {
+                        return strtoupper(Str::random(10));
+                    }, range(1, 8))
+                )->toArray();
+                
+                $admin->forceFill([
+                    'two_factor_recovery_codes' => encrypt(json_encode($recoveryCodes)),
+                ])->save();
+                
+                return response()->json([
+                    'success' => true,
+                    'recovery_codes' => $recoveryCodes,
+                    'message' => 'Two-factor authentication has been verified and recovery codes have been generated.'
+                ]);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'The code is valid.'
+            ]);
+        }
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'The provided code is invalid.'
+        ], 422);
     }
 }
