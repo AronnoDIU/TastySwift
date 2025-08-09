@@ -103,6 +103,7 @@ Route::prefix('admin')->name('admin.')->group(function() {
         
         // Activity Log
         Route::get('activity-log', [AdminController::class, 'activityLog'])->name('activity.log');
+        Route::post('activity-log/export', [AdminController::class, 'exportActivityLog'])->name('activity.export');
         
         // API Tokens
         Route::post('api/token/generate', [AdminController::class, 'generateApiToken'])

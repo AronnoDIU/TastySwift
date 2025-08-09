@@ -133,6 +133,97 @@ class AdminController extends Controller
         
         return view('admin.activity-log', compact('activities'));
     }
+    
+    /**
+     * Export the activity log in the specified format.
+     */
+    public function exportActivityLog(Request $request)
+    {
+        $request->validate([
+            'format' => 'required|in:csv,xls,pdf',
+            'start_date' => 'nullable|date',
+            'end_date' => 'nullable|date|after_or_equal:start_date',
+        ]);
+        
+        $admin = auth('admin')->user();
+        $activities = $admin->activities()->latest();
+        
+        // Apply date filters if provided
+        if ($request->filled('start_date')) {
+            $activities->whereDate('created_at', '>=', $request->start_date);
+        }
+        
+        if ($request->filled('end_date')) {
+            $activities->whereDate('created_at', '<=', $request->end_date);
+        }
+        
+        $activities = $activities->get();
+        
+        $fileName = 'activity-log-' . now()->format('Y-m-d-H-i-s') . '.' . $request->format;
+        
+        if ($request->format === 'csv') {
+            return $this->exportToCsv($activities, $fileName);
+        } elseif ($request->format === 'xls') {
+            return $this->exportToExcel($activities, $fileName);
+        } else {
+            return $this->exportToPdf($activities, $fileName);
+        }
+    }
+    
+    /**
+     * Export activities to CSV format.
+     */
+    protected function exportToCsv($activities, $fileName)
+    {
+        $headers = [
+            'Content-Type' => 'text/csv',
+            'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
+        ];
+        
+        $callback = function() use ($activities) {
+            $file = fopen('php://output', 'w');
+            
+            // Add CSV headers
+            fputcsv($file, [
+                'Event', 'Description', 'Date', 'IP Address', 'User Agent'
+            ]);
+            
+            // Add data rows
+            foreach ($activities as $activity) {
+                fputcsv($file, [
+                    ucfirst($activity->event_name),
+                    $activity->description,
+                    $activity->created_at->format('Y-m-d H:i:s'),
+                    $activity->properties->get('ip_address', 'N/A'),
+                    $activity->properties->get('user_agent', 'N/A')
+                ]);
+            }
+            
+            fclose($file);
+        };
+        
+        return response()->stream($callback, 200, $headers);
+    }
+    
+    /**
+     * Export activities to Excel format.
+     */
+    protected function exportToExcel($activities, $fileName)
+    {
+        // For Excel export, we'll just return a CSV for now
+        // In a real app, you'd use a package like Maatwebsite/Excel
+        return $this->exportToCsv($activities, $fileName);
+    }
+    
+    /**
+     * Export activities to PDF format.
+     */
+    protected function exportToPdf($activities, $fileName)
+    {
+        // For PDF export, we'll just return a CSV for now
+        // In a real app, you'd use a package like barryvdh/laravel-dompdf
+        return $this->exportToCsv($activities, $fileName);
+    }
 
     /**
      * Generate a new API token for the admin.
