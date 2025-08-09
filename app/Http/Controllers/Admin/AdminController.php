@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Admin;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Hash;
@@ -12,6 +13,11 @@ use Illuminate\Support\Str;
 use Illuminate\View\View;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules;
+use JsonException;
+use PragmaRX\Google2FA\Exceptions\IncompatibleWithGoogleAuthenticatorException;
+use PragmaRX\Google2FA\Exceptions\InvalidCharactersException;
+use PragmaRX\Google2FA\Exceptions\SecretKeyTooShortException;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AdminController extends Controller
 {
@@ -47,7 +53,7 @@ class AdminController extends Controller
     public function updateProfile(Request $request): RedirectResponse
     {
         $admin = $request->user('admin');
-        
+
         $validated = $request->validate([
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', Rule::unique('admins')->ignore($admin->id)],
@@ -65,11 +71,11 @@ class AdminController extends Controller
                     Storage::disk('public')->delete($oldPath);
                 }
             }
-            
+
             // Store the new avatar
-            $path = $request->file('avatar')->store('admin/avatars', 'public');
+            $path = $request->file('avatar')?->store('admin/avatars', 'public');
             $validated['avatar'] = $path;
-            
+
             // Clear the avatar URL from the model's cache
             if (method_exists($admin, 'forgetCachedAttributes')) {
                 $admin->forgetCachedAttributes(['avatar_url']);
@@ -77,7 +83,7 @@ class AdminController extends Controller
         }
 
         $admin->update($validated);
-        
+
         // Clear the avatar URL from the model's cache after update
         if (method_exists($admin, 'forgetCachedAttributes')) {
             $admin->forgetCachedAttributes(['avatar_url']);
@@ -112,7 +118,7 @@ class AdminController extends Controller
         $activities = $admin->actions()
             ->latest()
             ->paginate(10); // Changed from take(10)->get() to paginate(10)
-            
+
         return view('admin.settings', [
             'admin' => $admin,
             'activities' => $activities
@@ -144,65 +150,68 @@ class AdminController extends Controller
     public function activityLog(): View
     {
         $admin = auth('admin')->user();
-        $activities = $admin->activities()->latest()->paginate(15);
-        
+        $activities = $admin->activities()->latest()->paginate();
+
         return view('admin.activity-log', compact('activities'));
     }
-    
+
     /**
      * Export the activity log in the specified format.
      */
-    public function exportActivityLog(Request $request)
+    public function exportActivityLog(Request $request): StreamedResponse
     {
         $request->validate([
             'format' => 'required|in:csv,xls,pdf',
             'start_date' => 'nullable|date',
             'end_date' => 'nullable|date|after_or_equal:start_date',
         ]);
-        
+
         $admin = auth('admin')->user();
         $activities = $admin->activities()->latest();
-        
+
         // Apply date filters if provided
         if ($request->filled('start_date')) {
             $activities->whereDate('created_at', '>=', $request->start_date);
         }
-        
+
         if ($request->filled('end_date')) {
             $activities->whereDate('created_at', '<=', $request->end_date);
         }
-        
+
         $activities = $activities->get();
-        
-        $fileName = 'activity-log-' . now()->format('Y-m-d-H-i-s') . '.' . $request->format;
-        
-        if ($request->format === 'csv') {
+
+        $format = $request->input('format');
+        $fileName = 'activity-log-' . now()->format('Y-m-d-H-i-s') . '.' . $format;
+
+        if ($format === 'csv') {
             return $this->exportToCsv($activities, $fileName);
-        } elseif ($request->format === 'xls') {
-            return $this->exportToExcel($activities, $fileName);
-        } else {
-            return $this->exportToPdf($activities, $fileName);
         }
+
+        if ($format === 'xls') {
+            return $this->exportToExcel($activities, $fileName);
+        }
+
+        return $this->exportToPdf($activities, $fileName);
     }
-    
+
     /**
      * Export activities to CSV format.
      */
-    protected function exportToCsv($activities, $fileName)
+    protected function exportToCsv($activities, $fileName): StreamedResponse
     {
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => 'attachment; filename="' . $fileName . '"',
         ];
-        
+
         $callback = function() use ($activities) {
-            $file = fopen('php://output', 'w');
-            
+            $file = fopen('php://output', 'wb');
+
             // Add CSV headers
             fputcsv($file, [
                 'Event', 'Description', 'Date', 'IP Address', 'User Agent'
             ]);
-            
+
             // Add data rows
             foreach ($activities as $activity) {
                 fputcsv($file, [
@@ -213,27 +222,27 @@ class AdminController extends Controller
                     $activity->properties->get('user_agent', 'N/A')
                 ]);
             }
-            
+
             fclose($file);
         };
-        
+
         return response()->stream($callback, 200, $headers);
     }
-    
+
     /**
      * Export activities to Excel format.
      */
-    protected function exportToExcel($activities, $fileName)
+    protected function exportToExcel($activities, $fileName): StreamedResponse
     {
         // For Excel export, we'll just return a CSV for now
         // In a real app, you'd use a package like Maatwebsite/Excel
         return $this->exportToCsv($activities, $fileName);
     }
-    
+
     /**
      * Export activities to PDF format.
      */
-    protected function exportToPdf($activities, $fileName)
+    protected function exportToPdf($activities, $fileName): StreamedResponse
     {
         // For PDF export, we'll just return a CSV for now
         // In a real app, you'd use a package like barryvdh/laravel-dompdf
@@ -246,7 +255,7 @@ class AdminController extends Controller
     public function generateApiToken(Request $request): RedirectResponse
     {
         $token = $request->user('admin')->createToken('api-token');
-        
+
         return back()->with([
             'status' => 'API token generated successfully!',
             'api_token' => $token->plainTextToken,
@@ -259,10 +268,10 @@ class AdminController extends Controller
     public function revokeApiToken(Request $request): RedirectResponse
     {
         $request->user('admin')->tokens()->delete();
-        
+
         return back()->with('status', 'API token has been revoked.');
     }
-    
+
     /**
      * Delete the admin's account.
      */
@@ -273,165 +282,186 @@ class AdminController extends Controller
         ]);
 
         $admin = $request->user('admin');
-        
+
         // Log out the admin
         auth('admin')->logout();
-        
+
         // Delete the admin's profile photo if it exists
         if ($admin->profile_photo_path) {
             Storage::disk('public')->delete($admin->profile_photo_path);
         }
-        
+
         // Delete the admin
         $admin->delete();
-        
+
         // Invalidate the session
         $request->session()->invalidate();
         $request->session()->regenerateToken();
-        
+
         return redirect()->route('admin.login')
             ->with('status', 'Your account has been permanently deleted.');
     }
-    
+
     /**
      * Enable two-factor authentication for the admin.
      */
-    public function enableTwoFactorAuth(Request $request)
+    public function enableTwoFactorAuth(Request $request): JsonResponse
     {
         $admin = $request->user('admin');
-        
+
         // Generate a new secret key if one doesn't exist
         if (empty($admin->two_factor_secret)) {
             $google2fa = app('pragmarx.google2fa');
-            $secretKey = $google2fa->generateSecretKey();
-            
+            try {
+                $secretKey = $google2fa->generateSecretKey();
+            } catch (IncompatibleWithGoogleAuthenticatorException|InvalidCharactersException|SecretKeyTooShortException $e) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $e->getMessage()
+                ], 400);
+            }
+
             $admin->forceFill([
                 'two_factor_secret' => encrypt($secretKey),
                 'two_factor_recovery_codes' => null,
             ])->save();
         }
-        
+
         return response()->json([
             'success' => true,
             'message' => 'Two-factor authentication has been enabled.'
         ]);
     }
-    
+
     /**
      * Disable two-factor authentication for the admin.
      */
-    public function disableTwoFactorAuth(Request $request)
+    public function disableTwoFactorAuth(Request $request): JsonResponse
     {
         $admin = $request->user('admin');
-        
+
         $admin->forceFill([
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
         ])->save();
-        
+
         return response()->json([
             'success' => true,
             'message' => 'Two-factor authentication has been disabled.'
         ]);
     }
-    
+
     /**
      * Get the two-factor authentication QR code.
      */
-    public function getTwoFactorQrCode(Request $request)
+    public function getTwoFactorQrCode(Request $request): JsonResponse
     {
         $admin = $request->user('admin');
-        
+
         if (empty($admin->two_factor_secret)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Two-factor authentication is not enabled.'
             ], 400);
         }
-        
+
         $google2fa = app('pragmarx.google2fa');
         $qrCodeUrl = $google2fa->getQRCodeUrl(
             config('app.name'),
             $admin->email,
             decrypt($admin->two_factor_secret)
         );
-        
+
         return response()->json([
             'success' => true,
             'qr_code_url' => $qrCodeUrl
         ]);
     }
-    
+
     /**
      * Get the two-factor authentication secret key.
      */
-    public function getTwoFactorSecretKey(Request $request)
+    public function getTwoFactorSecretKey(Request $request): JsonResponse
     {
         $admin = $request->user('admin');
-        
+
         if (empty($admin->two_factor_secret)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Two-factor authentication is not enabled.'
             ], 400);
         }
-        
+
         return response()->json([
             'success' => true,
             'secret_key' => decrypt($admin->two_factor_secret)
         ]);
     }
-    
+
     /**
      * Verify the two-factor authentication code.
      */
-    public function verifyTwoFactorCode(Request $request)
+    public function verifyTwoFactorCode(Request $request): JsonResponse
     {
         $request->validate([
             'code' => 'required|string',
         ]);
-        
+
         $admin = $request->user('admin');
-        
+
         if (empty($admin->two_factor_secret)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Two-factor authentication is not enabled.'
             ], 400);
         }
-        
+
         $google2fa = app('pragmarx.google2fa');
-        $valid = $google2fa->verifyKey(
-            decrypt($admin->two_factor_secret),
-            $request->code
-        );
-        
+        try {
+            $valid = $google2fa->verifyKey(
+                decrypt($admin->two_factor_secret),
+                $request->code
+            );
+        } catch (IncompatibleWithGoogleAuthenticatorException|InvalidCharactersException|SecretKeyTooShortException $e) {
+            return response()->json([
+                'success' => false,
+                'message' => $e->getMessage()
+            ], 400);
+        }
+
         if ($valid) {
             // Generate recovery codes if they don't exist
             if (empty($admin->two_factor_recovery_codes)) {
                 $recoveryCodes = collect(
-                    array_map(function () {
+                    array_map(static function () {
                         return strtoupper(Str::random(10));
                     }, range(1, 8))
                 )->toArray();
-                
-                $admin->forceFill([
-                    'two_factor_recovery_codes' => encrypt(json_encode($recoveryCodes)),
-                ])->save();
-                
+
+                try {
+                    $admin->forceFill([
+                        'two_factor_recovery_codes' => encrypt(json_encode($recoveryCodes, JSON_THROW_ON_ERROR)),
+                    ])->save();
+                } catch (JsonException $e) {
+                    return response()->json([
+                        'success' => false,
+                        'message' => $e->getMessage()
+                    ], 400);
+                }
+
                 return response()->json([
                     'success' => true,
                     'recovery_codes' => $recoveryCodes,
                     'message' => 'Two-factor authentication has been verified and recovery codes have been generated.'
                 ]);
             }
-            
+
             return response()->json([
                 'success' => true,
                 'message' => 'The code is valid.'
             ]);
         }
-        
+
         return response()->json([
             'success' => false,
             'message' => 'The provided code is invalid.'

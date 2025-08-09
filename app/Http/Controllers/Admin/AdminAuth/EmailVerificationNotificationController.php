@@ -3,16 +3,15 @@
 namespace App\Http\Controllers\Admin\AdminAuth;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Auth;
 
 class EmailVerificationNotificationController extends Controller
 {
     /**
      * Send a new email verification notification.
      */
-    public function store(Request $request): Response
+    public function store(Request $request): RedirectResponse
     {
         if ($request->user('admin')->hasVerifiedEmail()) {
             return redirect()->intended(route('admin.dashboard'));

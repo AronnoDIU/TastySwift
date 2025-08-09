@@ -3,7 +3,11 @@
 namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Auth\Events\Verified;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Validation\ValidationException;
@@ -14,47 +18,48 @@ use Illuminate\Support\Str;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\Log;
+use Illuminate\View\View;
 
 class AdminLoginController extends Controller
 {
     /**
      * Show the admin login form.
      *
-     * @return \Illuminate\View\View
+     * @return View
      */
     /**
      * Show the admin login form.
      *
-     * @return \Illuminate\View\View|\Illuminate\Http\RedirectResponse
+     * @return View|RedirectResponse
      */
     public function showLoginForm()
     {
-        // If user is already authenticated as admin, redirect to dashboard
+        // If a user is already authenticated as admin, redirect to dashboard
         if (Auth::guard('admin')->check()) {
             return redirect()->route('admin.dashboard');
         }
-        
-        // If user is authenticated as regular user, log them out first
+
+        // If a user is authenticated as a regular user, log them out first
         if (Auth::check()) {
             Auth::logout();
             return redirect()->route('admin.login')
                 ->with('status', 'You have been logged out. Please log in as an admin.');
         }
-        
+
         return view('admin.auth.login');
     }
 
     /**
      * Handle an authentication attempt.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request
+     * @return JsonResponse|RedirectResponse
      */
     public function login(Request $request)
     {
         // Throttle login attempts
         $throttleKey = $this->throttleKey($request);
-        
+
         if (RateLimiter::tooManyAttempts($throttleKey, 5)) {
             $seconds = RateLimiter::availableIn($throttleKey);
             throw ValidationException::withMessages([
@@ -73,10 +78,10 @@ class AdminLoginController extends Controller
             $request->boolean('remember')
         )) {
             $request->session()->regenerate();
-            
+
             // Clear login attempts on successful login
             RateLimiter::clear($throttleKey);
-            
+
             // Log the login activity
             $admin = Auth::guard('admin')->user();
             activity('auth')
@@ -90,13 +95,13 @@ class AdminLoginController extends Controller
             if ($request->wantsJson()) {
                 return new JsonResponse([], 204);
             }
-            
+
             // Explicitly redirect to the admin dashboard
             return redirect()->route('admin.dashboard');
         }
 
         // Increment login attempts
-        RateLimiter::hit($throttleKey, 300); // 5 minutes cooldown
+        RateLimiter::hit($throttleKey, 300); // 5-minute cooldown
 
         throw ValidationException::withMessages([
             'email' => __('auth.failed'),
@@ -106,10 +111,10 @@ class AdminLoginController extends Controller
     /**
      * Log the admin out of the application.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request
+     * @return RedirectResponse|JsonResponse
      */
-    public function logout(Request $request)
+    public function logout(Request $request): RedirectResponse|JsonResponse
     {
         // Log the logout activity
         if (Auth::guard('admin')->check()) {
@@ -135,9 +140,9 @@ class AdminLoginController extends Controller
     /**
      * Show the forgot password form.
      *
-     * @return \Illuminate\View\View
+     * @return View
      */
-    public function showLinkRequestForm()
+    public function showLinkRequestForm(): View
     {
         return view('admin.auth.passwords.email');
     }
@@ -145,10 +150,10 @@ class AdminLoginController extends Controller
     /**
      * Handle a forgot password request.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request
+     * @return RedirectResponse
      */
-    public function sendResetLinkEmail(Request $request)
+    public function sendResetLinkEmail(Request $request): RedirectResponse
     {
         $request->validate(['email' => 'required|email']);
 
@@ -164,10 +169,10 @@ class AdminLoginController extends Controller
     /**
      * Show the password reset form.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\View\View
+     * @param Request $request
+     * @return View
      */
-    public function showResetForm(Request $request)
+    public function showResetForm(Request $request): View
     {
         $token = $request->route()->parameter('token');
         return view('admin.auth.passwords.reset', [
@@ -179,10 +184,10 @@ class AdminLoginController extends Controller
     /**
      * Handle a password reset request.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request
+     * @return RedirectResponse
      */
-    public function reset(Request $request)
+    public function reset(Request $request): RedirectResponse
     {
         $request->validate([
             'token' => 'required',
@@ -202,7 +207,7 @@ class AdminLoginController extends Controller
             }
         );
 
-        return $status == Password::PASSWORD_RESET
+        return $status === Password::PASSWORD_RESET
             ? redirect()->route('admin.login')->with('status', __($status))
             : back()->withErrors(['email' => [__($status)]]);
     }
@@ -210,10 +215,10 @@ class AdminLoginController extends Controller
     /**
      * Show the email verification notice.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response|\Illuminate\View\View
+     * @param Request $request
+     * @return RedirectResponse|View
      */
-    public function showEmailVerificationNotice(Request $request)
+    public function showEmailVerificationNotice(Request $request): RedirectResponse|View
     {
         return $request->user('admin')->hasVerifiedEmail()
             ? redirect()->route('admin.dashboard')
@@ -223,10 +228,10 @@ class AdminLoginController extends Controller
     /**
      * Mark the authenticated admin's email address as verified.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\RedirectResponse
+     * @param Request $request
+     * @return RedirectResponse|JsonResponse
      */
-    public function verifyEmail(Request $request)
+    public function verifyEmail(Request $request): RedirectResponse|JsonResponse
     {
         if (! hash_equals((string) $request->route('id'), (string) $request->user('admin')->getKey())) {
             throw new AuthorizationException;
@@ -254,10 +259,10 @@ class AdminLoginController extends Controller
     /**
      * Resend the email verification notification.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response|\Illuminate\Http\JsonResponse
+     * @param Request $request
+     * @return JsonResponse|RedirectResponse
      */
-    public function resendVerificationEmail(Request $request)
+    public function resendVerificationEmail(Request $request): JsonResponse|RedirectResponse
     {
         if ($request->user('admin')->hasVerifiedEmail()) {
             return $request->wantsJson()
@@ -275,10 +280,10 @@ class AdminLoginController extends Controller
     /**
      * Get the throttle key for the given request.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param Request $request
      * @return string
      */
-    protected function throttleKey(Request $request)
+    protected function throttleKey(Request $request): string
     {
         return Str::transliterate(Str::lower($request->input('email')) . '|' . $request->ip());
     }
@@ -286,9 +291,9 @@ class AdminLoginController extends Controller
     /**
      * Show the password confirmation form.
      *
-     * @return \Illuminate\View\View
+     * @return View
      */
-    public function showConfirmForm()
+    public function showConfirmForm(): View
     {
         return view('admin.auth.confirm-password');
     }
@@ -296,8 +301,8 @@ class AdminLoginController extends Controller
     /**
      * Confirm the user's password.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return mixed
+     * @param Request $request
+     * @return JsonResponse|RedirectResponse
      */
     public function confirm(Request $request)
     {

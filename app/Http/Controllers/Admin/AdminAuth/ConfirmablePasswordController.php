@@ -3,17 +3,18 @@
 namespace App\Http\Controllers\Admin\AdminAuth;
 
 use App\Http\Controllers\Controller;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
+use Illuminate\View\View;
 
 class ConfirmablePasswordController extends Controller
 {
     /**
-     * Show the confirm password view.
+     * Show the confirmation password view.
      */
-    public function show(): \Illuminate\View\View
+    public function show(): View
     {
         return view('admin.auth.confirm-password');
     }
@@ -21,7 +22,7 @@ class ConfirmablePasswordController extends Controller
     /**
      * Confirm the user's password.
      */
-    public function store(Request $request): Response
+    public function store(Request $request): RedirectResponse
     {
         if (! Hash::check($request->password, $request->user('admin')->password)) {
             throw ValidationException::withMessages([
